@@ -1,0 +1,10 @@
+# Windows shortcuts
+*.lnk
+
+.DS_Store
+.AppleDouble
+.LSOverride
+.vscode
+
+files/credentials/vault_password_file
+*.log

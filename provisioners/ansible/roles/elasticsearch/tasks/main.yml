@@ -1,0 +1,160 @@
+---
+# ------------------------------------------------------------------
+# 1. Repository & installation
+# ------------------------------------------------------------------
+
+- name: Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - gpg
+    state: present
+    update_cache: true
+
+- name: Download Elasticsearch GPG key
+  ansible.builtin.get_url:
+    url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    dest: /tmp/GPG-KEY-elasticsearch
+    mode: '0644'
+
+- name: Dearmor Elasticsearch GPG key into keyring
+  ansible.builtin.shell: gpg --dearmor --yes --output /usr/share/keyrings/elasticsearch-keyring.gpg /tmp/GPG-KEY-elasticsearch
+  args:
+    creates: /usr/share/keyrings/elasticsearch-keyring.gpg
+
+- name: Add Elasticsearch repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/apt stable main"
+    state: present
+    filename: elasticsearch
+
+- name: Install Elasticsearch
+  ansible.builtin.apt:
+    name: elasticsearch
+    state: present
+    update_cache: true
+
+# ------------------------------------------------------------------
+# 2. System configuration
+# ------------------------------------------------------------------
+
+- name: Configure system memory limits (vm.max_map_count)
+  ansible.posix.sysctl:
+    name: vm.max_map_count
+    value: "262144"
+    state: present
+    reload: true
+
+# ------------------------------------------------------------------
+# 3. Directories & ownership (prevents exit code 78 / logs dir errors)
+# ------------------------------------------------------------------
+
+- name: Ensure Elasticsearch data directory exists with correct ownership
+  ansible.builtin.file:
+    path: /var/lib/elasticsearch
+    state: directory
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0750'
+
+- name: Ensure Elasticsearch log directory exists with correct ownership
+  ansible.builtin.file:
+    path: /var/log/elasticsearch
+    state: directory
+    owner: elasticsearch
+    group: elasticsearch
+    mode: '0750'
+
+- name: Ensure Elasticsearch config directory ownership is correct
+  ansible.builtin.file:
+    path: /etc/elasticsearch
+    state: directory
+    owner: root
+    group: elasticsearch
+    mode: '0750'
+
+- name: Verify /etc/default/elasticsearch env file exists
+  ansible.builtin.stat:
+    path: /etc/default/elasticsearch
+  register: es_default_file
+
+- name: Restore missing env file via package reinstall
+  ansible.builtin.command:
+    cmd: apt-get install --reinstall -y -o Dpkg::Options::=--force-confmiss elasticsearch
+  when: not es_default_file.stat.exists
+  changed_when: true
+
+# ------------------------------------------------------------------
+# 4. Elasticsearch configuration
+# ------------------------------------------------------------------
+
+- name: Configure Elasticsearch JVM heap size
+  ansible.builtin.template:
+    src: heap.options.j2
+    dest: /etc/elasticsearch/jvm.options.d/heap.options
+    owner: root
+    group: elasticsearch
+    mode: '0660'
+  notify: Restart elasticsearch
+
+- name: Copy Elasticsearch configuration file
+  ansible.builtin.template:
+    src: elasticsearch.yml.j2
+    dest: /etc/elasticsearch/elasticsearch.yml
+    owner: root
+    group: elasticsearch
+    mode: '0660'
+  notify: Restart elasticsearch
+
+- name: Flush handlers to apply config changes before service start
+  ansible.builtin.meta: flush_handlers
+
+# ------------------------------------------------------------------
+# 5. Service startup
+# ------------------------------------------------------------------
+
+- name: Enable and start Elasticsearch service
+  ansible.builtin.systemd:
+    name: elasticsearch
+    state: started
+    enabled: true
+
+- name: Wait for Elasticsearch HTTP port to be reachable
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 9200
+    delay: 5
+    timeout: 90
+
+# ------------------------------------------------------------------
+# 6. Verify TLS auto-configuration ran (fresh 8.x node)
+# ------------------------------------------------------------------
+
+- import_tasks: certs.yml
+  tags: elasticsearch_certs_setup
+
+# ------------------------------------------------------------------
+# 7. Password setup (idempotent, vaulted)
+# ------------------------------------------------------------------
+
+- import_tasks: creds.yml
+  tags: elasticsearch_creds_setup
+
+# ------------------------------------------------------------------
+# 8. Final validation
+# ------------------------------------------------------------------
+
+- name: Verify final password works
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9200/_cluster/health"
+    method: GET
+    user: elastic
+    password: "{{ elastic_password }}"
+    validate_certs: false
+    status_code: 200
+  register: final_check
+  no_log: true
+
+- name: Report cluster health status
+  ansible.builtin.debug:
+    msg: "Elasticsearch cluster status: {{ final_check.json.status }}"

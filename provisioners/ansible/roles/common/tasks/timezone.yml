@@ -1,0 +1,17 @@
+---
+- name: Set locale
+  locale_gen:
+    name: "{{ common_locale }}"
+    state: present
+
+- name: Timezone conditional tasks
+  block:
+    - name: Ensure timezone package is installed
+      package:
+        name: tzdata
+      when: ansible_os_family == "Debian"
+
+    - name: Set timezone
+      timezone:
+        name: "{{ common_timezone }}"
+  when: common_timezone is defined

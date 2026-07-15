@@ -1,0 +1,27 @@
+---
+- name: Build hostname string
+  set_fact:
+    hostname_string: "{{ common_hostname + '-' + ansible_default_ipv4.address | regex_replace('[^0-9a-z]', '-') }}"
+
+- name: Output final hostname string
+  debug:
+    msg: "{{ hostname_string }}"
+
+- name: Set hostname
+  hostname:
+    name: "{{ hostname_string }}"
+  register: hostname
+
+- name: Set in /etc/hosts
+  lineinfile:
+    regexp: "^127.0.0.1"
+    dest: "/etc/hosts"
+    line: "127.0.0.1   localhost   {{ hostname.name }}"
+  when: hostname.changed
+
+- name: Set in /etc/hosts
+  replace:
+    regexp: "{{ ansible_hostname }}"
+    dest: "/etc/hosts"
+    replace: "{{ hostname.name }}"
+  when: hostname.changed

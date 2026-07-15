@@ -1,0 +1,22 @@
+---
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - ap-southeast-1
+
+filters:
+  tag:environment: production
+
+keyed_groups:
+  - prefix: tag.Hostgroup
+    key: tags.hostgroup
+
+hostnames:
+  - ip-address
+  - private-ip-address
+
+compose:
+  ansible_user: "'ubuntu'"
+  ansible_host: public_ip_address
+
+strict: False

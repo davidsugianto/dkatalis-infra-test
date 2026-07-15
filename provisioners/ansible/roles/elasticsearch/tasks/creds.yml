@@ -1,0 +1,76 @@
+---
+- name: Check if password has already been set (idempotency marker)
+  ansible.builtin.stat:
+    path: /etc/elasticsearch/.password_configured
+  register: password_marker
+
+- name: Wait for Elasticsearch HTTP port to be reachable
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: 9200
+    delay: 5
+    timeout: 60
+  when: not password_marker.stat.exists
+
+- name: Reset elastic user password (batch, non-interactive)
+  ansible.builtin.command:
+    cmd: /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s
+  register: reset_result
+  no_log: true
+  changed_when: true
+  when: not password_marker.stat.exists
+
+- name: Extract auto-generated password from reset output
+  ansible.builtin.set_fact:
+    initial_elastic_password: "{{ reset_result.stdout | trim }}"
+  no_log: true
+  when: not password_marker.stat.exists
+
+- name: Confirm cluster is responding with the temporary password
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9200/_cluster/health"
+    method: GET
+    user: elastic
+    password: "{{ initial_elastic_password }}"
+    validate_certs: false
+    status_code: 200
+  register: es_health
+  retries: 10
+  delay: 5
+  until: es_health.status == 200
+  no_log: true
+  when: not password_marker.stat.exists
+
+- name: Set elastic user password to vaulted value
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9200/_security/user/elastic/_password"
+    method: POST
+    user: elastic
+    password: "{{ initial_elastic_password }}"
+    body_format: json
+    body:
+      password: "{{ elastic_password }}"
+    validate_certs: false
+    status_code: 200
+  no_log: true
+  when: not password_marker.stat.exists
+
+- name: Create marker file to prevent password reset on future runs
+  ansible.builtin.file:
+    path: /etc/elasticsearch/.password_configured
+    state: touch
+    owner: root
+    group: elasticsearch
+    mode: '0600'
+  when: not password_marker.stat.exists
+
+- name: Verify final password works
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9200/_cluster/health"
+    method: GET
+    user: elastic
+    password: "{{ elastic_password }}"
+    validate_certs: false
+    status_code: 200
+  register: final_check
+  no_log: true

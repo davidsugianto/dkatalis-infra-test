@@ -1,0 +1,13 @@
+---
+- name: Check for auto-generated TLS certs (confirms auto-config ran)
+  ansible.builtin.stat:
+    path: /etc/elasticsearch/certs/http.p12
+  register: http_cert
+
+- name: Fail clearly if auto-configuration did not generate certs
+  ansible.builtin.fail:
+    msg: >
+      /etc/elasticsearch/certs/http.p12 not found. Auto-configuration did not run —
+      check journalctl -u elasticsearch for errors, and confirm this is a genuinely
+      fresh node with no pre-existing data directory under /var/lib/elasticsearch.
+  when: not http_cert.stat.exists

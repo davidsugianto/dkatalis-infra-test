@@ -1,0 +1,16 @@
+---
+- name: Setup Elasticsearch
+  hosts: tag_Hostgroup_es_node
+  become: true
+  vars:
+    common_hostname: es-node
+    common_type: 'elasticsearch'
+    network_host: "0.0.0.0"
+    
+    es_version: '8.x'
+    es_cluster_name: "es-node-cluster"
+    es_seed_hosts: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, 'inventory_hostname') | list }}"
+    es_initial_master_node: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, ['ansible_facts', 'hostname']) | list }}"
+  roles:
+    - common
+    - elasticsearch

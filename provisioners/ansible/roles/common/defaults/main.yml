@@ -1,0 +1,30 @@
+---
+
+#
+# hostname.yaml
+#
+
+common_hostname: host # Hostgroup which will become the hostname e.g. host-10-zzz-yyy-xxx
+common_type: '' # Workload types, e.g. elasticsearch, postgres, mysql, prometheus, etc.
+
+
+#
+# timezone.yaml
+#
+
+common_timezone: Asia/Jakarta
+common_locale: en_US.UTF-8
+
+#
+# packages.yaml
+#
+
+all_common_packages:
+  - htop
+  - jq
+  - tree
+  - curl
+  - wget
+  - vim
+  - unzip
+  - git

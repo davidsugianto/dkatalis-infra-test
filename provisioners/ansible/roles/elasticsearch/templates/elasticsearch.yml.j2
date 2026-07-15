@@ -1,0 +1,27 @@
+cluster.name: "{{ es_cluster_name }}"
+node.name: "{{ ansible_facts['hostname'] }}"
+
+network.host: "{{ network_host }}"
+http.port: 9200
+
+discovery.seed_hosts: {{ es_seed_hosts | to_json }}
+cluster.initial_master_nodes: {{ es_initial_master_node | to_json }}
+
+path.logs: /var/log/elasticsearch
+path.data: /var/lib/elasticsearch
+
+xpack.security.enabled: true
+xpack.security.enrollment.enabled: true
+
+xpack.security.http.ssl:
+  enabled: true
+  keystore.path: certs/http.p12
+
+xpack.security.transport.ssl:
+  enabled: true
+  verification_mode: certificate
+  keystore.path: certs/transport.p12
+  truststore.path: certs/transport.p12
+
+xpack.ml.enabled: false
+bootstrap.memory_lock: false
