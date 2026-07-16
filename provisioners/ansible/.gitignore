@@ -12,3 +12,4 @@ certs-out
 
 *.crt
 *.key
+*.p12

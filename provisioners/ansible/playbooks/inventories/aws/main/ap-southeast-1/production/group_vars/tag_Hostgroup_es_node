@@ -20,6 +20,12 @@ es_cluster_name: "es-node-cluster"
 network_host: "0.0.0.0"
 es_heap_size: "1g"
 
+es_node_roles:
+  - master
+  - data_hot
+  - data_content
+  - ingest
+
 es_seed_hosts: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
 es_initial_master_node: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, ['ansible_facts', 'hostname']) | list }}"
 
@@ -27,3 +33,5 @@ es_initial_master_node: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hos
 es_cluster_bootstrapped: false
 
 es_node_count: "{{ groups['tag_Hostgroup_es_node'] | length }}"
+es_first_node: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+es_group_node: "{{ groups['tag_Hostgroup_es_node'] }}"

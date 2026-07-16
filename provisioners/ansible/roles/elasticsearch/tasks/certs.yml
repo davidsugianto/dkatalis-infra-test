@@ -1,100 +1,36 @@
 ---
-- name: Distribute CA certificate
-  ansible.builtin.copy:
-    src: ca.crt
-    dest: /etc/elasticsearch/certs/ca.crt
-    owner: root
-    group: elasticsearch
-    mode: '0644'
-  notify: Restart elasticsearch
-
-- name: Distribute instance certificate
-  ansible.builtin.copy:
-    src: instance.crt
-    dest: /etc/elasticsearch/certs/instance.crt
-    owner: root
-    group: elasticsearch
-    mode: '0644'
-  notify: Restart elasticsearch
-
-- name: Distribute instance private key
-  ansible.builtin.copy:
-    src: instance.key
-    dest: /etc/elasticsearch/certs/instance.key
-    owner: root
-    group: elasticsearch
-    mode: '0640'
-  notify: Restart elasticsearch
-
-- name: Remove obsolete SSL password entries from ES keystore
-  ansible.builtin.command:
-    cmd: "/usr/share/elasticsearch/bin/elasticsearch-keystore remove {{ item }}"
-  loop:
-    - xpack.security.transport.ssl.keystore.secure_password
-    - xpack.security.transport.ssl.truststore.secure_password
-    - xpack.security.http.ssl.keystore.secure_password
-    - xpack.security.http.ssl.truststore.secure_password
-  register: keystore_remove
-  failed_when: false
-  changed_when: keystore_remove.rc == 0
-  notify: Restart elasticsearch
-
-- name: Remove old p12 file
+- name: Create certs working directory
   ansible.builtin.file:
-    path: /etc/elasticsearch/certs/elastic-certificates.p12
-    state: absent
-
-# b
-- name: Remove orphaned secure settings from ES keystore
-  ansible.builtin.command:
-    cmd: "/usr/share/elasticsearch/bin/elasticsearch-keystore remove {{ item }}"
-  loop:
-    - xpack.security.transport.ssl.keystore.secure_password
-    - xpack.security.transport.ssl.truststore.secure_password
-    - xpack.security.http.ssl.keystore.secure_password
-    - xpack.security.http.ssl.truststore.secure_password
-    - autoconfiguration.password_hash
-  register: keystore_remove
-  failed_when: false          # entries may already be gone - fine
-  changed_when: keystore_remove.rc == 0
-  notify: Restart elasticsearch
-
-- name: Remove legacy p12 keystore file
-  ansible.builtin.file:
-    path: /etc/elasticsearch/certs/elastic-certificates.p12
-    state: absent
-  notify: Restart elasticsearch
-
-- name: Ensure PEM cert permissions are correct
-  ansible.builtin.file:
-    path: "/etc/elasticsearch/certs/{{ item.name }}"
+    path: /etc/elasticsearch/certs
+    state: directory
     owner: root
     group: elasticsearch
-    mode: "{{ item.mode }}"
-  loop:
-    - { name: "ca.crt", mode: "0644" }
-    - { name: "instance.crt", mode: "0644" }
-    - { name: "instance.key", mode: "0640" }
+    mode: "0750"
+  tags: [es_certs, es_certs_ca]
 
-- name: Validate PEM files on the node
+- name: Generate CA (elastic-stack-ca.p12)
   ansible.builtin.command:
-    cmd: "{{ item }}"
-  loop:
-    - "openssl x509 -in /etc/elasticsearch/certs/ca.crt -noout -subject"
-    - "openssl x509 -in /etc/elasticsearch/certs/instance.crt -noout -subject"
-    - "openssl rsa -in /etc/elasticsearch/certs/instance.key -check -noout"
-  changed_when: false
+    cmd: >
+      /usr/share/elasticsearch/bin/elasticsearch-certutil ca
+      --out /etc/elasticsearch/certs/elastic-stack-ca.p12
+      --pass "{{ elastic_cert_password }}"
+    creates: /etc/elasticsearch/certs/elastic-stack-ca.p12
+  tags: [es_certs, es_certs_ca]
 
-- name: Verify ES keystore contains only expected entries
+- name: Generate transport certificate (elastic-certificates.p12)
   ansible.builtin.command:
-    cmd: /usr/share/elasticsearch/bin/elasticsearch-keystore list
-  register: keystore_final
-  changed_when: false
-  failed_when: "'secure_password' in keystore_final.stdout"
+    cmd: >
+      /usr/share/elasticsearch/bin/elasticsearch-certutil cert
+      --ca /etc/elasticsearch/certs/elastic-stack-ca.p12
+      --ca-pass "{{ elastic_cert_password }}"
+      --out /etc/elasticsearch/certs/elastic-certificates.p12
+      --pass "{{ elastic_cert_password }}"
+    creates: /etc/elasticsearch/certs/elastic-certificates.p12
+  tags: [es_certs, es_certs_transport]
 
-- name: Ensure ES keystore ownership is correct (keystore commands run as root reset it)
-  ansible.builtin.file:
-    path: /etc/elasticsearch/elasticsearch.keystore
-    owner: root
-    group: elasticsearch
-    mode: '0660'
+- name: Fetch transport cert to the control node's role files
+  ansible.builtin.fetch:
+    src: /etc/elasticsearch/certs/elastic-certificates.p12
+    dest: "{{ role_path }}/files/elastic-certificates.p12"
+    flat: true
+  tags: [es_certs, es_certs_fetch]

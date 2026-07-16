@@ -8,34 +8,34 @@
       - gpg
     state: present
     update_cache: true
-  tags: [elasticsearch_install]
+  tags: [es_install]
 
 - name: Download Elasticsearch GPG key
   ansible.builtin.get_url:
     url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
     dest: /tmp/GPG-KEY-elasticsearch
     mode: '0644'
-  tags: [elasticsearch_install]
+  tags: [es_install]
 
 - name: Dearmor Elasticsearch GPG key into keyring
   ansible.builtin.shell: gpg --dearmor --yes --output /usr/share/keyrings/elasticsearch-keyring.gpg /tmp/GPG-KEY-elasticsearch
   args:
     creates: /usr/share/keyrings/elasticsearch-keyring.gpg
-  tags: [elasticsearch_install]
+  tags: [es_install]
 
 - name: Add Elasticsearch repository
   ansible.builtin.apt_repository:
     repo: "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/{{ es_version.split('.')[0] }}.x/apt stable main"
     state: present
     filename: elasticsearch
-  tags: [elasticsearch_install]
+  tags: [es_install]
 
 - name: Install Elasticsearch
   ansible.builtin.apt:
-    name: elasticsearch
+    name: "elasticsearch={{ es_version }}"
     state: present
     update_cache: true
-  tags: [elasticsearch_install]
+  tags: [es_install]
 
 # 2. System configuration
 
@@ -45,7 +45,15 @@
     value: "262144"
     state: present
     reload: true
-  tags: [elasticsearch_system]
+  tags: [es_system]
+
+- name: Configure system file descriptor limits
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.conf
+    line: "elasticsearch  -  nofile  65535"
+    create: true
+    mode: "0644"
+  tags: [es_system]
 
 # 3. Directories & ownership
 
@@ -56,7 +64,7 @@
     owner: elasticsearch
     group: elasticsearch
     mode: '0750'
-  tags: [elasticsearch_dir]
+  tags: [es_dir]
 
 - name: Ensure Elasticsearch log directory exists with correct ownership
   ansible.builtin.file:
@@ -65,7 +73,7 @@
     owner: elasticsearch
     group: elasticsearch
     mode: '0750'
-  tags: [elasticsearch_dir]
+  tags: [es_dir]
 
 - name: Ensure Elasticsearch config directory ownership is correct
   ansible.builtin.file:
@@ -74,7 +82,7 @@
     owner: root
     group: elasticsearch
     mode: '0750'
-  tags: [elasticsearch_dir]
+  tags: [es_dir]
 
 - name: Ensure certs directory exists
   ansible.builtin.file:
@@ -83,25 +91,29 @@
     owner: root
     group: elasticsearch
     mode: '0750'
-  tags: [elasticsearch_dir]
+  tags: [es_dir]
 
-- name: Verify /etc/default/elasticsearch env file exists
-  ansible.builtin.stat:
-    path: /etc/default/elasticsearch
-  register: es_default_file
-  tags: [elasticsearch_dir]
+- name: Ensure ES keystore ownership is correct (keystore commands run as root reset it)
+  ansible.builtin.file:
+    path: /etc/elasticsearch/elasticsearch.keystore
+    owner: root
+    group: elasticsearch
+    mode: '0660'
+  tags: [es_dir]
 
-- name: Restore missing env file via package reinstall
-  ansible.builtin.command:
-    cmd: apt-get install --reinstall -y -o Dpkg::Options::=--force-confmiss elasticsearch
-  when: not es_default_file.stat.exists
-  changed_when: true
-  tags: [elasticsearch_dir]
+# 4. Configure TLS certificates
 
-# 4. Shared TLS certificates (one CA for the whole cluster)
+- name: Generate and fetch TLS certificates (runs once, on the first node)
+  ansible.builtin.include_tasks:
+    file: certs.yml
+    apply:
+      delegate_to: "{{ es_first_node }}"
+      run_once: true
+  tags: [es_certs]
 
-- import_tasks: certs.yml
-  tags: [elasticsearch_certs]
+- name: Distribute the fetched certs to every node
+  import_tasks: distribute-certs.yml
+  tags: [es_certs]
 
 # 5. Elasticsearch configuration
 
@@ -113,7 +125,7 @@
     group: elasticsearch
     mode: '0660'
   notify: Restart elasticsearch
-  tags: [elasticsearch_config]
+  tags: [es_config]
 
 - name: Copy Elasticsearch configuration file
   ansible.builtin.template:
@@ -123,11 +135,7 @@
     group: elasticsearch
     mode: '0660'
   notify: Restart elasticsearch
-  tags: [elasticsearch_config]
-
-- name: Flush handlers to apply config changes before service start
-  ansible.builtin.meta: flush_handlers
-  tags: [elasticsearch_config]
+  tags: [es_config]
 
 # 6. Service startup
 
@@ -136,7 +144,7 @@
     name: elasticsearch
     state: started
     enabled: true
-  tags: [elasticsearch_service]
+  tags: [es_service]
 
 - name: Wait for Elasticsearch HTTP port to be reachable
   ansible.builtin.wait_for:
@@ -144,32 +152,19 @@
     port: 9200
     delay: 5
     timeout: 90
-  tags: [elasticsearch_service, elasticsearch_validate]
+  tags: [es_service, es_validate]
 
-# 7. Cluster formation check (all nodes joined)
+# 7. Password setup
 
-- name: Wait for all nodes to join the cluster
-  ansible.builtin.uri:
-    url: "https://127.0.0.1:9200/_cluster/health?wait_for_nodes={{ es_node_count }}&timeout=120s"
-    method: GET
-    user: elastic
-    password: "{{ elastic_password }}"
-    validate_certs: false
-    status_code: [200, 401]
-  register: cluster_formation
-  run_once: true
-  retries: 5
-  delay: 10
-  until: cluster_formation.status in [200, 401]
-  no_log: true
-  tags: [elasticsearch_validate, elasticsearch_password]
+- name: Set elasticsearch password credentials
+  ansible.builtin.include_tasks:
+    file: creds.yml
+    apply:
+      delegate_to: "{{ es_first_node }}"
+      run_once: true
+  tags: [es_password]
 
-# 8. Password setup
-
-- import_tasks: creds.yml
-  tags: [elasticsearch_password]
-
-# 9. Final validation
+# 8. Final validation
 
 - name: Verify final password works and cluster is healthy
   ansible.builtin.uri:
@@ -185,8 +180,7 @@
   delay: 10
   until: final_check.status == 200
   no_log: true
-  tags: [elasticsearch_validate]
-
+  tags: [es_validate]
 
 - name: Report cluster status
   ansible.builtin.debug:
@@ -195,4 +189,4 @@
       Status: {{ final_check.json.status }},
       Nodes: {{ final_check.json.number_of_nodes }}/{{ es_node_count }}
   run_once: true
-  tags: [elasticsearch_validate]
+  tags: [es_validate]
