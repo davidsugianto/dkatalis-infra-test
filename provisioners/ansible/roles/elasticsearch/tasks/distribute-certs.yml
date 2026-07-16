@@ -8,50 +8,59 @@
     mode: "0750"
   tags: [es_certs, es_certs_distribute]
 
-- name: Copy transport certificates
+- name: Unarchive cert bundle directly to this node
+  ansible.builtin.unarchive:
+    src: "{{ role_path }}/files/certs-bundle.zip"
+    dest: /tmp
+  tags: [es_certs, es_certs_distribute]
+
+- name: Determine this node's cert label
+  ansible.builtin.set_fact:
+    node_label: "{{ tags.Name | default(inventory_hostname) }}"
+  tags: [es_certs, es_certs_distribute]
+
+- name: Copy this node's own p12 into place
   ansible.builtin.copy:
-    src: elastic-certificates.p12
+    src: "/tmp/{{ node_label }}/{{ node_label }}.p12"
     dest: /etc/elasticsearch/certs/elastic-certificates.p12
     owner: root
     group: elasticsearch
     mode: "0640"
+    remote_src: true
   notify: Restart elasticsearch
   tags: [es_certs, es_certs_distribute]
 
-# - name: Copy HTTP certificates
-#   ansible.builtin.copy:
-#     src: http.p12
-#     dest: /etc/elasticsearch/certs/http.p12
-#     owner: root
-#     group: elasticsearch
-#     mode: "0640"
-#   notify: Restart elasticsearch
-#   tags: [es_certs, es_certs_distribute]
+- name: Clean up extracted temp cert
+  ansible.builtin.file:
+    path: "/tmp/{{ node_label }}"
+    state: absent
+  tags: [es_certs, es_certs_distribute]
 
+# Keystore password tasks below unchanged
 - name: Set transport keystore password
   ansible.builtin.shell: >
-    echo "{{ elastic_cert_password }}" | 
+    echo "{{ elastic_cert_password }}" |
     /usr/share/elasticsearch/bin/elasticsearch-keystore add xpack.security.transport.ssl.keystore.secure_password --stdin --force
   changed_when: true
   tags: [es_certs, es_keystore]
 
 - name: Set transport truststore password
   ansible.builtin.shell: >
-    echo "{{ elastic_cert_password }}" | 
+    echo "{{ elastic_cert_password }}" |
     /usr/share/elasticsearch/bin/elasticsearch-keystore add xpack.security.transport.ssl.truststore.secure_password --stdin --force
   changed_when: true
   tags: [es_certs, es_keystore]
 
 - name: Set HTTP keystore password
   ansible.builtin.shell: >
-    echo "{{ elastic_cert_password }}" | 
+    echo "{{ elastic_cert_password }}" |
     /usr/share/elasticsearch/bin/elasticsearch-keystore add xpack.security.http.ssl.keystore.secure_password --stdin --force
   changed_when: true
   tags: [es_certs, es_keystore]
 
 - name: Set HTTP truststore password
   ansible.builtin.shell: >
-    echo "{{ elastic_cert_password }}" | 
+    echo "{{ elastic_cert_password }}" |
     /usr/share/elasticsearch/bin/elasticsearch-keystore add xpack.security.http.ssl.truststore.secure_password --stdin --force
   changed_when: true
   tags: [es_certs, es_keystore]

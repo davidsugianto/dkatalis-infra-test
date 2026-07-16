@@ -8,8 +8,10 @@ instances:
     ip:
       - "{{ hv.private_ip_address }}"
       - "{{ hv.public_ip_address }}"
+      - "127.0.0.1"
     dns:
       - "{{ node_label }}"
+      - "localhost"
 {% if hv.private_dns_name is defined %}
       - "{{ hv.private_dns_name }}"
 {% endif %}

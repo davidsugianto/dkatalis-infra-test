@@ -1,0 +1,12 @@
+---
+- name: Remove old CA and cert artifacts to force regeneration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/elasticsearch/certs/elastic-stack-ca.p12
+    - /etc/elasticsearch/certs/instances.yml
+    - /etc/elasticsearch/certs/certs-bundle.zip
+    - "{{ role_path }}/files/certs-bundle.zip"
+    - "{{ role_path }}/files/elastic-certificates.p12"
+  tags: [es_certs_force]

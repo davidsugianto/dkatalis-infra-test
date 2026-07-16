@@ -103,6 +103,14 @@
 
 # 4. Configure TLS certificates
 
+- name: Remove bad certs to force regeneration (only runs when explicitly tagged)
+  ansible.builtin.include_tasks:
+    file: force-regen-certs.yml
+    apply:
+      delegate_to: "{{ es_first_node }}"
+      run_once: true
+  tags: [es_certs_force]
+
 - name: Generate and fetch TLS certificates (runs once, on the first node)
   ansible.builtin.include_tasks:
     file: certs.yml
