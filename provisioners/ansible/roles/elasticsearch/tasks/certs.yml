@@ -1,13 +1,46 @@
 ---
-- name: Check for auto-generated TLS certs (confirms auto-config ran)
-  ansible.builtin.stat:
-    path: /etc/elasticsearch/certs/http.p12
-  register: http_cert
+- name: Create certs working directory
+  ansible.builtin.file:
+    path: /etc/elasticsearch/certs
+    state: directory
+    owner: root
+    group: elasticsearch
+    mode: "0750"
+  tags: [es_certs, es_certs_ca]
 
-- name: Fail clearly if auto-configuration did not generate certs
-  ansible.builtin.fail:
-    msg: >
-      /etc/elasticsearch/certs/http.p12 not found. Auto-configuration did not run —
-      check journalctl -u elasticsearch for errors, and confirm this is a genuinely
-      fresh node with no pre-existing data directory under /var/lib/elasticsearch.
-  when: not http_cert.stat.exists
+- name: Generate CA (elastic-stack-ca.p12)
+  ansible.builtin.command:
+    cmd: >
+      /usr/share/elasticsearch/bin/elasticsearch-certutil ca
+      --out /etc/elasticsearch/certs/elastic-stack-ca.p12
+      --pass "{{ elastic_cert_password }}"
+    creates: /etc/elasticsearch/certs/elastic-stack-ca.p12
+  tags: [es_certs, es_certs_ca]
+
+- name: Render instances.yml for all cluster nodes
+  ansible.builtin.template:
+    src: instances.yml.j2
+    dest: /etc/elasticsearch/certs/instances.yml
+    owner: root
+    group: elasticsearch
+    mode: "0640"
+  tags: [es_certs, es_certs_transport]
+
+- name: Generate per-node cert bundle signed by the CA
+  ansible.builtin.command:
+    cmd: >
+      /usr/share/elasticsearch/bin/elasticsearch-certutil cert
+      --ca /etc/elasticsearch/certs/elastic-stack-ca.p12
+      --ca-pass "{{ elastic_cert_password }}"
+      --in /etc/elasticsearch/certs/instances.yml
+      --out /etc/elasticsearch/certs/certs-bundle.zip
+      --pass "{{ elastic_cert_password }}"
+    creates: /etc/elasticsearch/certs/certs-bundle.zip
+  tags: [es_certs, es_certs_transport]
+
+- name: Fetch cert bundle to the control node's role files
+  ansible.builtin.fetch:
+    src: /etc/elasticsearch/certs/certs-bundle.zip
+    dest: "{{ role_path }}/files/certs-bundle.zip"
+    flat: true
+  tags: [es_certs, es_certs_fetch]

@@ -1,70 +1,60 @@
 ---
-- name: Check if password has already been set (idempotency marker)
+- name: Check if we've already bootstrapped the elastic password
   ansible.builtin.stat:
-    path: /etc/elasticsearch/.password_configured
+    path: /etc/elasticsearch/.elastic_password_set
   register: password_marker
+  tags: [es_password]
 
-- name: Wait for Elasticsearch HTTP port to be reachable
-  ansible.builtin.wait_for:
-    host: "127.0.0.1"
-    port: 9200
-    delay: 5
-    timeout: 60
-  when: not password_marker.stat.exists
-
-- name: Reset elastic user password (batch, non-interactive)
-  ansible.builtin.command:
-    cmd: /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s
-  register: reset_result
-  no_log: true
-  changed_when: true
-  when: not password_marker.stat.exists
-
-- name: Extract auto-generated password from reset output
-  ansible.builtin.set_fact:
-    initial_elastic_password: "{{ reset_result.stdout | trim }}"
-  no_log: true
-  when: not password_marker.stat.exists
-
-- name: Confirm cluster is responding with the temporary password
+- name: Check if vaulted password is actually valid right now
   ansible.builtin.uri:
-    url: "https://127.0.0.1:9200/_cluster/health"
+    url: "https://127.0.0.1:9200/_security/_authenticate"
     method: GET
     user: elastic
-    password: "{{ initial_elastic_password }}"
+    password: "{{ elastic_password }}"
     validate_certs: false
-    status_code: 200
-  register: es_health
-  retries: 10
-  delay: 5
-  until: es_health.status == 200
-  no_log: true
-  when: not password_marker.stat.exists
+    status_code: [200, 401]
+  register: auth_check
+  ignore_errors: true
+  tags: [es_password]
 
-- name: Set elastic user password to vaulted value
+- name: Bootstrap elastic password (auto-generated, temporary)
+  ansible.builtin.command: >
+    /usr/share/elasticsearch/bin/elasticsearch-reset-password
+    -u elastic -a -s -b --url https://127.0.0.1:9200
+  register: bootstrap_password
+  no_log: true
+  when: not password_marker.stat.exists or auth_check.status != 200
+  changed_when: true
+  retries: 5
+  delay: 10
+  until: bootstrap_password.rc == 0
+  tags: [es_password]
+
+- name: Set the desired custom password via Security API
   ansible.builtin.uri:
     url: "https://127.0.0.1:9200/_security/user/elastic/_password"
     method: POST
     user: elastic
-    password: "{{ initial_elastic_password }}"
+    password: "{{ bootstrap_password.stdout | trim }}"
     body_format: json
     body:
       password: "{{ elastic_password }}"
     validate_certs: false
-    status_code: 200
   no_log: true
-  when: not password_marker.stat.exists
+  when: not password_marker.stat.exists or auth_check.status != 200
+  tags: [es_password]
 
-- name: Create marker file to prevent password reset on future runs
+- name: Mark password as configured
   ansible.builtin.file:
-    path: /etc/elasticsearch/.password_configured
+    path: /etc/elasticsearch/.elastic_password_set
     state: touch
-    owner: root
+    owner: elasticsearch
     group: elasticsearch
     mode: '0600'
-  when: not password_marker.stat.exists
+  when: not password_marker.stat.exists or auth_check.status != 200
+  tags: [es_password]
 
-- name: Verify final password works
+- name: Verify new password authenticates successfully
   ansible.builtin.uri:
     url: "https://127.0.0.1:9200/_cluster/health"
     method: GET
@@ -72,5 +62,4 @@
     password: "{{ elastic_password }}"
     validate_certs: false
     status_code: 200
-  register: final_check
-  no_log: true
+  tags: [es_password]

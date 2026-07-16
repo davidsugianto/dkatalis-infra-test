@@ -8,7 +8,7 @@ init:
 	terragrunt init --terragrunt-working-dir $(dir)
 
 plan:
-	terragrunt plan --terragrunt-working-dir $(dir)
+	terragrunt plan --target=$(dir)
 
 apply:
 	terragrunt apply --terragrunt-working-dir $(dir)

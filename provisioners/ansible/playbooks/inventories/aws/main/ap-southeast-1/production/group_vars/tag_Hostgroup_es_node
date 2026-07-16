@@ -6,3 +6,32 @@ elastic_password: !vault |
           33646233366639343864633132613764366433346232666531613838323231306464363531333664
           6437353064343365370a386532326438333665303734303234623561353335666233306137356530
           3333
+
+elastic_cert_password: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          32633334383937383662653863663237373762383039646263653134373734353834333663393132
+          3539363062323066643838303230663261656364323332610a363835643931633665656266303830
+          37303266343837643764373365383434396265386465366537333039346134613838386639363235
+          3034616339313234620a386336323338663139616633643533666665353731633834303261363665
+          34353065303433386431613161373736616165306436336639336366663337376166
+
+es_version: "8.15.0"
+es_cluster_name: "es-node-cluster"
+network_host: "0.0.0.0"
+es_heap_size: "1g"
+
+es_node_roles:
+  - master
+  - data_hot
+  - data_content
+  - ingest
+
+es_seed_hosts: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, ['ansible_default_ipv4', 'address']) | list }}"
+es_initial_master_node: "{{ groups['tag_Hostgroup_es_node'] | map('extract', hostvars, ['ansible_facts', 'hostname']) | list }}"
+
+# Update to true AFTER first successful cluster formation, and removes cluster.initial_master_nodes from rendered config
+es_cluster_bootstrapped: false
+
+es_node_count: "{{ groups['tag_Hostgroup_es_node'] | length }}"
+es_first_node: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+es_group_node: "{{ groups['tag_Hostgroup_es_node'] }}"

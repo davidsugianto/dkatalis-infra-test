@@ -3,7 +3,7 @@ include "root" {
 }
 
 terraform {
-  source = "../../../../../../../../provisioners/terraform-aws-modules//vpc"
+  source = "${dirname(find_in_parent_folders())}/../../../provisioners/terraform-aws-modules//vpc"
 }
 
 inputs = {
