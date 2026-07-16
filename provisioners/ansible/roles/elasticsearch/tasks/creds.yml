@@ -1,45 +1,59 @@
 ---
-- name: Check if password has already been set (idempotency marker)
-  ansible.builtin.stat:
-    path: /etc/elasticsearch/.password_configured
-  register: password_marker
+- name: Wait for cluster to be formed (HTTP layer answering)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9200/_cluster/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 401]
+  register: cluster_up
+  retries: 12
+  delay: 10
+  until: cluster_up.status in [200, 401]
+  run_once: true
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"
 
-- name: Wait for Elasticsearch HTTP port to be reachable
-  ansible.builtin.wait_for:
-    host: "127.0.0.1"
-    port: 9200
-    delay: 5
-    timeout: 60
-  when: not password_marker.stat.exists
-
-- name: Reset elastic user password (batch, non-interactive)
-  ansible.builtin.command:
-    cmd: /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s
-  register: reset_result
-  no_log: true
-  changed_when: true
-  when: not password_marker.stat.exists
-
-- name: Extract auto-generated password from reset output
-  ansible.builtin.set_fact:
-    initial_elastic_password: "{{ reset_result.stdout | trim }}"
-  no_log: true
-  when: not password_marker.stat.exists
-
-- name: Confirm cluster is responding with the temporary password
+- name: Probe whether vaulted password already works
   ansible.builtin.uri:
     url: "https://127.0.0.1:9200/_cluster/health"
     method: GET
     user: elastic
-    password: "{{ initial_elastic_password }}"
+    password: "{{ elastic_password }}"
     validate_certs: false
-    status_code: 200
-  register: es_health
-  retries: 10
-  delay: 5
-  until: es_health.status == 200
+    status_code: [200, 401]
+  register: password_probe
+  run_once: true
   no_log: true
-  when: not password_marker.stat.exists
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+
+- name: Reset elastic user password (batch, non-interactive)
+  ansible.builtin.command:
+    cmd: /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s --url https://127.0.0.1:9200
+  register: reset_result
+  no_log: true
+  changed_when: true
+  retries: 3
+  delay: 15
+  until: reset_result.rc == 0
+  run_once: true
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+  when: password_probe.status == 401
+
+- name: Fix keystore ownership after reset (tool rewrites it as root)
+  ansible.builtin.file:
+    path: /etc/elasticsearch/elasticsearch.keystore
+    owner: root
+    group: elasticsearch
+    mode: '0660'
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+  run_once: true
+  when: password_probe.status == 401
+
+- name: Extract auto-generated password from reset output
+  ansible.builtin.set_fact:
+    initial_elastic_password: "{{ reset_result.stdout | regex_search('New value: (.+)', '\\1') | first }}"
+  no_log: true
+  run_once: true
+  when: password_probe.status == 401
 
 - name: Set elastic user password to vaulted value
   ansible.builtin.uri:
@@ -53,18 +67,11 @@
     validate_certs: false
     status_code: 200
   no_log: true
-  when: not password_marker.stat.exists
+  run_once: true
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"
+  when: password_probe.status == 401
 
-- name: Create marker file to prevent password reset on future runs
-  ansible.builtin.file:
-    path: /etc/elasticsearch/.password_configured
-    state: touch
-    owner: root
-    group: elasticsearch
-    mode: '0600'
-  when: not password_marker.stat.exists
-
-- name: Verify final password works
+- name: Verify vaulted password works
   ansible.builtin.uri:
     url: "https://127.0.0.1:9200/_cluster/health"
     method: GET
@@ -72,5 +79,6 @@
     password: "{{ elastic_password }}"
     validate_certs: false
     status_code: 200
-  register: final_check
+  run_once: true
   no_log: true
+  delegate_to: "{{ groups['tag_Hostgroup_es_node'][0] }}"

@@ -1,13 +1,100 @@
 ---
-- name: Check for auto-generated TLS certs (confirms auto-config ran)
-  ansible.builtin.stat:
-    path: /etc/elasticsearch/certs/http.p12
-  register: http_cert
+- name: Distribute CA certificate
+  ansible.builtin.copy:
+    src: ca.crt
+    dest: /etc/elasticsearch/certs/ca.crt
+    owner: root
+    group: elasticsearch
+    mode: '0644'
+  notify: Restart elasticsearch
 
-- name: Fail clearly if auto-configuration did not generate certs
-  ansible.builtin.fail:
-    msg: >
-      /etc/elasticsearch/certs/http.p12 not found. Auto-configuration did not run —
-      check journalctl -u elasticsearch for errors, and confirm this is a genuinely
-      fresh node with no pre-existing data directory under /var/lib/elasticsearch.
-  when: not http_cert.stat.exists
+- name: Distribute instance certificate
+  ansible.builtin.copy:
+    src: instance.crt
+    dest: /etc/elasticsearch/certs/instance.crt
+    owner: root
+    group: elasticsearch
+    mode: '0644'
+  notify: Restart elasticsearch
+
+- name: Distribute instance private key
+  ansible.builtin.copy:
+    src: instance.key
+    dest: /etc/elasticsearch/certs/instance.key
+    owner: root
+    group: elasticsearch
+    mode: '0640'
+  notify: Restart elasticsearch
+
+- name: Remove obsolete SSL password entries from ES keystore
+  ansible.builtin.command:
+    cmd: "/usr/share/elasticsearch/bin/elasticsearch-keystore remove {{ item }}"
+  loop:
+    - xpack.security.transport.ssl.keystore.secure_password
+    - xpack.security.transport.ssl.truststore.secure_password
+    - xpack.security.http.ssl.keystore.secure_password
+    - xpack.security.http.ssl.truststore.secure_password
+  register: keystore_remove
+  failed_when: false
+  changed_when: keystore_remove.rc == 0
+  notify: Restart elasticsearch
+
+- name: Remove old p12 file
+  ansible.builtin.file:
+    path: /etc/elasticsearch/certs/elastic-certificates.p12
+    state: absent
+
+# b
+- name: Remove orphaned secure settings from ES keystore
+  ansible.builtin.command:
+    cmd: "/usr/share/elasticsearch/bin/elasticsearch-keystore remove {{ item }}"
+  loop:
+    - xpack.security.transport.ssl.keystore.secure_password
+    - xpack.security.transport.ssl.truststore.secure_password
+    - xpack.security.http.ssl.keystore.secure_password
+    - xpack.security.http.ssl.truststore.secure_password
+    - autoconfiguration.password_hash
+  register: keystore_remove
+  failed_when: false          # entries may already be gone - fine
+  changed_when: keystore_remove.rc == 0
+  notify: Restart elasticsearch
+
+- name: Remove legacy p12 keystore file
+  ansible.builtin.file:
+    path: /etc/elasticsearch/certs/elastic-certificates.p12
+    state: absent
+  notify: Restart elasticsearch
+
+- name: Ensure PEM cert permissions are correct
+  ansible.builtin.file:
+    path: "/etc/elasticsearch/certs/{{ item.name }}"
+    owner: root
+    group: elasticsearch
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: "ca.crt", mode: "0644" }
+    - { name: "instance.crt", mode: "0644" }
+    - { name: "instance.key", mode: "0640" }
+
+- name: Validate PEM files on the node
+  ansible.builtin.command:
+    cmd: "{{ item }}"
+  loop:
+    - "openssl x509 -in /etc/elasticsearch/certs/ca.crt -noout -subject"
+    - "openssl x509 -in /etc/elasticsearch/certs/instance.crt -noout -subject"
+    - "openssl rsa -in /etc/elasticsearch/certs/instance.key -check -noout"
+  changed_when: false
+
+- name: Verify ES keystore contains only expected entries
+  ansible.builtin.command:
+    cmd: /usr/share/elasticsearch/bin/elasticsearch-keystore list
+  register: keystore_final
+  changed_when: false
+  failed_when: "'secure_password' in keystore_final.stdout"
+
+- name: Ensure ES keystore ownership is correct (keystore commands run as root reset it)
+  ansible.builtin.file:
+    path: /etc/elasticsearch/elasticsearch.keystore
+    owner: root
+    group: elasticsearch
+    mode: '0660'

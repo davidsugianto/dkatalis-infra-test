@@ -8,3 +8,7 @@
 
 files/credentials/vault_password_file
 *.log
+certs-out
+
+*.crt
+*.key

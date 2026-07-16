@@ -52,8 +52,8 @@ variable "environment" {
 }
 
 variable "instance_port" {
-  description = "Instance port to open in the security group"
-  type        = number
+  description = "Instance ports to open in the security group"
+  type        = list(number)
 }
 
 variable "userdata_vars" {

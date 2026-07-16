@@ -11,12 +11,15 @@ resource "aws_security_group" "this" {
     cidr_blocks = [var.ssh_allowed_cidr]
   }
 
-  ingress {
-    description = "Instance port"
-    from_port   = var.instance_port
-    to_port     = var.instance_port
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  dynamic "ingress" {
+    for_each = var.instance_port
+    content {
+      description = "Instance port"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   egress {

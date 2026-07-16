@@ -5,7 +5,10 @@ network.host: "{{ network_host }}"
 http.port: 9200
 
 discovery.seed_hosts: {{ es_seed_hosts | to_json }}
+
+{% if es_cluster_bootstrapped | default(false) == false %}
 cluster.initial_master_nodes: {{ es_initial_master_node | to_json }}
+{% endif %}
 
 path.logs: /var/log/elasticsearch
 path.data: /var/lib/elasticsearch
@@ -13,15 +16,18 @@ path.data: /var/lib/elasticsearch
 xpack.security.enabled: true
 xpack.security.enrollment.enabled: true
 
-xpack.security.http.ssl:
-  enabled: true
-  keystore.path: certs/http.p12
-
 xpack.security.transport.ssl:
   enabled: true
   verification_mode: certificate
-  keystore.path: certs/transport.p12
-  truststore.path: certs/transport.p12
+  certificate_authorities: ["certs/ca.crt"]
+  certificate: certs/instance.crt
+  key: certs/instance.key
+
+xpack.security.http.ssl:
+  enabled: true
+  certificate_authorities: ["certs/ca.crt"]
+  certificate: certs/instance.crt
+  key: certs/instance.key
 
 xpack.ml.enabled: false
 bootstrap.memory_lock: false
