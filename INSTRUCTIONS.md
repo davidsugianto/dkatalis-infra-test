@@ -6,7 +6,7 @@ Repository: https://github.com/davidsugianto/dkatalis-infra-test
 
 This repository provisions AWS EC2 instances and installs a **multi-node Elasticsearch 8.x cluster** (3 nodes by default) with security (authentication + TLS on both HTTP and transport layers, backed by a shared CA) enabled, fully automated end to end. The workflow is split into two layers, mirroring how I structure infrastructure at work:
 
-**Infrastructure layer — Terraform + Terragrunt.** Reusable Terraform modules live under `provisioners/terraform-aws-modules/` (a `vpc` module and an `instance` module), while environment-specific configuration lives under `resources/terraform/aws/` in a Terragrunt hierarchy (`account -> region -> environment -> stack`). Variables cascade down through `global.tfvars`, `account.tfvars`, `region.tfvars`, and `network.tfvars`, so adding a new instance group is just a matter of creating a new small `terragrunt.hcl` file and running `make plan` / `make apply` with the target directory. The es-node stack launches `instance_amount = 3` identical instances behind one security group (ports 9200 HTTP and 9300 transport); cluster size is a single variable. A Makefile wraps the Terragrunt commands for consistency.
+**Infrastructure layer — Terraform + Terragrunt.** Reusable Terraform modules live under `provisioners/terraform-aws-modules/` (a `vpc` module and an `instance` module), while environment-specific configuration lives under `resources/terraform/aws/` in a Terragrunt hierarchy (`account -> region -> environment -> stack`). Variables cascade down through `global.tfvars`, `account.tfvars`, `region.tfvars`, and `network.tfvars`, so adding a new instance group is just a matter of creating a new small `terragrunt.hcl` file and running `terragrunt plan` / `terragrunt apply` with the target directory. The es-node stack launches `instance_amount = 3` identical instances behind one security group (ports 9200 HTTP and 9300 transport); cluster size is a single variable. A Makefile wraps the Terragrunt commands for consistency.
 
 **Configuration layer — Ansible.** Once the instances are up, an Ansible playbook (`es-node.yml`) configures all of them in one run. Hosts are discovered dynamically through the `amazon.aws.aws_ec2` inventory plugin, keyed on the `hostgroup` EC2 tag that Terraform assigns — no static inventory files to maintain, so scaling the cluster is purely a Terraform change. The playbook applies two roles:
 
@@ -32,7 +32,7 @@ This repository provisions AWS EC2 instances and installs a **multi-node Elastic
 
 ## 3. Time Spent & Feedback
 
-- Time spent: **~2.5 hours** on the core exercise (infrastructure + Elasticsearch role + smoke test). <!-- adjust to your actual number -->
+- Time spent: **~2.5 days** on the core exercise (infrastructure + Elasticsearch role + smoke test).
 - Feedback: the exercise is well scoped — it is small enough to finish in the time box but leaves clear room to demonstrate production thinking (security, structure, extensibility). The trade-off questions at the end are a good prompt for honest discussion. One suggestion: clarify whether "free tier" is a hard constraint, since ES 8.x with security enabled realistically needs more than 1 GB of RAM.
 
 ## 4. Additional Services Used

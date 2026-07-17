@@ -96,9 +96,9 @@ All commands run from `resources/terraform/aws/` via the Makefile wrapper.
 cd resources/terraform/aws
 
 # 1a. Create the VPC
-make init  dir=main/ap-southeast-1/production/vpc/app
-make plan  dir=main/ap-southeast-1/production/vpc/app
-make apply dir=main/ap-southeast-1/production/vpc/app
+cd main/ap-southeast-1/production/vpc/app
+terragrunt plan 
+terragrunt apply -auto-approve
 
 # 1b. Update the es-node stack inputs with the resulting vpc_id / subnet_id,
 #     your AMI, your key pair name, and the desired cluster size
@@ -106,9 +106,9 @@ make apply dir=main/ap-southeast-1/production/vpc/app
 #     main/ap-southeast-1/production/instances/es-node/zone-a/terragrunt.hcl
 
 # 1c. Create the Elasticsearch cluster nodes
-make init  dir=main/ap-southeast-1/production/instances/es-node/zone-a
-make plan  dir=main/ap-southeast-1/production/instances/es-node/zone-a
-make apply dir=main/ap-southeast-1/production/instances/es-node/zone-a
+cd main/ap-southeast-1/production/instances/es-node/zone-a
+terragrunt plan 
+terragrunt apply -auto-approve
 ```
 
 The stack launches `instance_amount` EC2 instances (default **3**) behind one security group with ports 9200 (HTTP) and 9300 (transport) open. Every instance is tagged with `hostgroup = es-node` and `environment = production` — these tags are what the Ansible dynamic inventory keys on, so the cluster size is purely a Terraform variable: scale by changing `instance_amount`, no Ansible changes needed.
@@ -143,7 +143,7 @@ ansible-inventory -i inventories/aws/main/ap-southeast-1/production/aws_ec2.yml 
 # Run the playbook against the whole cluster
 ansible-playbook \
   -i inventories/aws/main/ap-southeast-1/production/aws_ec2.yml \
-  elasticsearch/es-node.yml
+  elasticsearch/es-node.yml --diff
 ```
 
 (The vault passphrase is read from the `vault_password_file` configured in `ansible.cfg`; pass `--ask-vault-pass` instead if you skipped that step.)
